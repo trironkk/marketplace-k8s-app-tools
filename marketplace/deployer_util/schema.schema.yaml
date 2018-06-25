@@ -1,0 +1,25 @@
+"$schema": http://json-schema.org/draft-06/schema#
+title: Google Kubernetes Marketplace Deployer Schema
+description:
+  A JSON schema to validate the schema.yaml that comes with every deployer.
+type: object
+
+required:
+- properties
+
+properties:
+  properties:
+    type: object
+    required:
+    - type
+    properties:
+      name:
+        type: string
+      type:
+        type: string
+
+
+  required:
+    type: array
+    items:
+      types: string
