@@ -1,0 +1,21 @@
+steps:
+
+- id: Pull dev
+  name: gcr.io/cloud-builders/docker
+  waitFor:
+  - '-'
+  args:
+  - pull
+  - gcr.io/$PROJECT_ID/k8s/dev:sha_$COMMIT_SHA
+
+- id: Retag dev
+  name: gcr.io/cloud-builders/docker
+  waitFor:
+  - '-'
+  args:
+  - tag
+  - gcr.io/$PROJECT_ID/k8s/dev:sha_$COMMIT_SHA
+  - gcr.io/$PROJECT_ID/k8s/dev:sha_$TAG_NAME
+
+images:
+- gcr.io/$PROJECT_ID/k8s/dev:sha_$TAG_NAME
