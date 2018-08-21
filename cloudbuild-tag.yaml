@@ -17,3 +17,5 @@ steps:
 
 images:
 - gcr.io/$PROJECT_ID/k8s/dev:$TAG_NAME
+- gcr.io/$PROJECT_ID/k8s/deployer_helm:$TAG_NAME
+- gcr.io/$PROJECT_ID/k8s/deployer_envsubst:$TAG_NAME
