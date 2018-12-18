@@ -44,7 +44,7 @@ def main():
       values,
       deployer_image=args.deployer_image,
       deployer_entrypoint=args.deployer_entrypoint)
-  print yaml.safe_dump_all(manifests, default_flow_style=False, indent=2)
+  print(yaml.safe_dump_all(manifests, default_flow_style=False, indent=2))
 
 
 def process(schema, values, deployer_image, deployer_entrypoint):
@@ -52,6 +52,9 @@ def process(schema, values, deployer_image, deployer_entrypoint):
   manifests = []
   app_name = get_name(schema, values)
   namespace = get_namespace(schema, values)
+
+  # Inject DEPLOYER_IMAGE property values if not already present.
+  values = inject_deployer_image_properties(values, schema, deployer_image)
 
   # Handle provisioning of reporting secrets from storage if a URI
   # is provided.
@@ -92,6 +95,16 @@ def process(schema, values, deployer_image, deployer_entrypoint):
       deployer_entrypoint=deployer_entrypoint,
       app_params=app_params)
   return manifests
+
+
+def inject_deployer_image_properties(values, schema, deployer_image):
+  for key in schema.properties:
+    if key in values:
+      continue
+    if not schema.properties[key].xtype == 'DEPLOYER_IMAGE':
+      continue
+    values[key] = deployer_image
+  return values
 
 
 def provision_from_storage(key, value, app_name, namespace):
@@ -272,12 +285,15 @@ def provision_service_account(schema, prop, app_name, namespace):
         'apiVersion': 'rbac.authorization.k8s.io/v1',
         'kind': 'RoleBinding',
         'metadata': {
-            'name': '{}:{}:{}-rb'.format(app_name, prop.name, role),
-            'namespace': namespace,
+            'name':
+                limit_name('{}:{}:{}-rb'.format(app_name, prop.name, role), 64),
+            'namespace':
+                namespace,
         },
         'roleRef': {
             'apiGroup': 'rbac.authorization.k8s.io',
-            'kind': 'Role',
+            # Note: predefined ones are actually cluster roles.
+            'kind': 'ClusterRole',
             'name': role,
         },
         'subjects': subjects,
@@ -288,7 +304,9 @@ def provision_service_account(schema, prop, app_name, namespace):
         'kind': 'ClusterRoleBinding',
         'metadata': {
             'name':
-                '{}:{}:{}:{}-rb'.format(namespace, app_name, prop.name, role),
+                limit_name(
+                    '{}:{}:{}:{}-crb'.format(namespace, app_name, prop.name,
+                                             role), 64),
             'namespace':
                 namespace,
         },
@@ -299,7 +317,7 @@ def provision_service_account(schema, prop, app_name, namespace):
         },
         'subjects': subjects,
     })
-  return sa_name, add_preprovisioned_labels(manifests, sa_name)
+  return sa_name, add_preprovisioned_labels(manifests, prop.name)
 
 
 def provision_storage_class(schema, prop, app_name, namespace):
@@ -318,7 +336,7 @@ def provision_storage_class(schema, prop, app_name, namespace):
             'type': 'pd-ssd',
         }
     }]
-    return sc_name, add_preprovisioned_labels(manifests, sc_name)
+    return sc_name, add_preprovisioned_labels(manifests, prop.name)
   else:
     raise Exception('Do not know how to provision for property {}'.format(
         prop.name))
@@ -355,17 +373,20 @@ def dns1123_name(name):
   fixed = re.sub(r'[.]', '-', fixed)
   fixed = re.sub(r'[^a-z0-9-]', '', fixed)
   fixed = fixed.strip('-')
-  if len(fixed) > 64:
-    fixed = fixed[:59]
+  fixed = limit_name(fixed, 64)
+  return fixed
 
-  # Add a hash at the end if the name has been modified.
-  if fixed != name:
+
+def limit_name(name, length=127):
+  result = name
+  if len(result) > length:
+    result = result[:length - 5]
     # Hash and get the first 4 characters of the hash.
     m = hashlib.sha256()
     m.update(name)
     h4sh = m.hexdigest()[:4]
-    fixed = '{}-{}'.format(fixed, h4sh)
-  return fixed
+    result = '{}-{}'.format(result, h4sh)
+  return result
 
 
 def add_preprovisioned_labels(manifests, prop_name):

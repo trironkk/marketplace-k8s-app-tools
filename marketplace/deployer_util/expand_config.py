@@ -39,21 +39,24 @@ class MissingRequiredProperty(Exception):
 
 def main():
   parser = ArgumentParser(description=_PROG_HELP)
-  schema_values_common.add_to_argument_parser(
-      parser, values_file='/data/values.yaml', values_dir='/data/values')
+  schema_values_common.add_to_argument_parser(parser)
   parser.add_argument(
       '--final_values_file',
       help='Where the final value file should be written to',
       default='/data/final_values.yaml')
+  parser.add_argument(
+      '--app_uid',
+      help='The application UID for populating into APPLICATION_UID properties.',
+      default='')
   args = parser.parse_args()
 
   schema = schema_values_common.load_schema(args)
   values = schema_values_common.load_values(args)
-  values = expand(values, schema)
+  values = expand(values, schema, app_uid=args.app_uid)
   write_values(values, args.final_values_file)
 
 
-def expand(values_dict, schema):
+def expand(values_dict, schema, app_uid=''):
   """Returns the expanded values according to schema."""
   schema.validate()
 
@@ -71,6 +74,14 @@ def expand(values_dict, schema):
         raise InvalidProperty(
             'Property {} is expected to be of type string'.format(k))
       result[k] = generate_password(prop.password)
+      continue
+
+    if v is None and prop.xtype == 'APPLICATION_UID':
+      if not app_uid:
+        raise InvalidProperty(
+            'Property {} is of type APPLICATION_UID, but --app_uid was not '
+            'specified.'.format(k, v))
+      result[k] = app_uid
       continue
 
     if v is None and prop.default is not None:
@@ -97,8 +108,8 @@ def expand(values_dict, schema):
   for k, v in generated.iteritems():
     if k in result:
       raise InvalidProperty(
-          'The property is to be generated, but already has a value: {}'
-          .format(k))
+          'The property is to be generated, but already has a value: {}'.format(
+              k))
     result[k] = v
   return result
 
@@ -130,6 +141,23 @@ def generate_properties_for_image(prop, value, result):
     before_value, after_value = parts
     result[before_name] = before_value
     result[after_name] = after_value
+  if prop.image._split_to_registry_repo_tag:
+    reg_name, repo_name, tag_name = prop.image._split_to_registry_repo_tag
+    parts = value.split(':', 1)
+    if len(parts) != 2:
+      raise InvalidProperty(
+          'Property {} has a value that does not contain a tag'.format(
+              prop.name, value))
+    nontag_value, tag_value = parts
+    parts = nontag_value.split('/', 1)
+    if len(parts) != 2:
+      raise InvalidProperty(
+          'Property {} has a value that does not include a registry'.format(
+              prop.name, value))
+    reg_value, repo_value = parts
+    result[reg_name] = reg_value
+    result[repo_name] = repo_value
+    result[tag_name] = tag_value
 
 
 def generate_properties_for_string(prop, value, result):

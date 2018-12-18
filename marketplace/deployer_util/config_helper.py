@@ -22,17 +22,21 @@ import sys
 
 import yaml
 
-NAME_RE = re.compile(r'[a-zA-z0-9_\.]+$')
+NAME_RE = re.compile(r'[a-zA-z0-9_\.\-]+$')
 
 XGOOGLE = 'x-google-marketplace'
 XTYPE_NAME = 'NAME'
 XTYPE_NAMESPACE = 'NAMESPACE'
 XTYPE_IMAGE = 'IMAGE'
+XTYPE_DEPLOYER_IMAGE = 'DEPLOYER_IMAGE'
 XTYPE_PASSWORD = 'GENERATED_PASSWORD'
 XTYPE_REPORTING_SECRET = 'REPORTING_SECRET'
 XTYPE_SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
 XTYPE_STORAGE_CLASS = 'STORAGE_CLASS'
 XTYPE_STRING = 'STRING'
+XTYPE_APPLICATION_UID = 'APPLICATION_UID'
+
+WIDGET_TYPES = ['help']
 
 
 class InvalidName(Exception):
@@ -47,16 +51,16 @@ class InvalidSchema(Exception):
   pass
 
 
-def load_values(values_file, values_dir, values_dir_encoding, schema):
+def load_values(values_file, values_dir, schema):
   if values_file == '-':
     return yaml.safe_load(sys.stdin.read())
   if values_file and os.path.isfile(values_file):
     with open(values_file, 'r') as f:
       return yaml.safe_load(f.read())
-  return _read_values_to_dict(values_dir, values_dir_encoding, schema)
+  return _read_values_to_dict(values_dir, schema)
 
 
-def _read_values_to_dict(values_dir, codec, schema):
+def _read_values_to_dict(values_dir, schema):
   """Returns a dict constructed from files in values_dir."""
   files = [
       f for f in os.listdir(values_dir)
@@ -68,7 +72,7 @@ def _read_values_to_dict(values_dir, codec, schema):
       raise InvalidName('Invalid config parameter name: {}'.format(filename))
     file_path = os.path.join(values_dir, filename)
     with open(file_path, "r") as f:
-      data = f.read().decode(codec)
+      data = f.read().decode('utf-8')
       result[filename] = data
 
   # Data read in as strings. Convert them to proper types defined in schema.
@@ -103,27 +107,47 @@ class Schema:
         x for x in self._required if x not in self._properties
     ]
     if bad_required_names:
-      raise InvalidSchema('Undefined property names found in required: {}'
-                          .format(', '.join(bad_required_names)))
+      raise InvalidSchema(
+          'Undefined property names found in required: {}'.format(
+              ', '.join(bad_required_names)))
 
-    self._app_api_version = dictionary.get('application_api_version', None)
+    self._app_api_version = dictionary.get(
+        'applicationApiVersion', dictionary.get('application_api_version',
+                                                None))
+
+    self._form = dictionary.get('form', [])
 
   def validate(self):
     """Fully validates the schema, raising InvalidSchema if fails."""
     if self.app_api_version is None:
-      raise InvalidSchema('application_api_version is required')
+      raise InvalidSchema('applicationApiVersion is required')
+
+    if len(self.form) > 1:
+      raise InvalidSchema('form must not contain more than 1 item.')
+
+    for item in self.form:
+      if 'widget' not in item:
+        raise InvalidSchema('form items must have a widget.')
+      if item['widget'] not in WIDGET_TYPES:
+        raise InvalidSchema('Unrecognized form widget: {}', item['widget'])
+      if 'description' not in item:
+        raise InvalidSchema('form items must have a description.')
 
   @property
   def app_api_version(self):
     return self._app_api_version
 
   @property
+  def properties(self):
+    return self._properties
+
+  @property
   def required(self):
     return self._required
 
   @property
-  def properties(self):
-    return self._properties
+  def form(self):
+    return self._form
 
   def properties_matching(self, definition):
     return [
@@ -173,7 +197,8 @@ class SchemaProperty:
         raise InvalidSchema('Property {} has {} without a type'.format(
             name, XGOOGLE))
       xt = self._x['type']
-      if xt in (XTYPE_NAME, XTYPE_NAMESPACE):
+      if xt in (XTYPE_NAME, XTYPE_NAMESPACE, XTYPE_APPLICATION_UID,
+                XTYPE_DEPLOYER_IMAGE):
         pass
       elif xt == XTYPE_IMAGE:
         d = self._x.get('image', {})
@@ -292,10 +317,11 @@ class SchemaProperty:
 
 
 class SchemaXImage:
-  """Wrapper class providing convenient access to IMAGE property."""
+  """Wrapper class providing convenient access to IMAGE and DEPLOYER_IMAGE properties."""
 
   def __init__(self, dictionary):
     self._split_by_colon = None
+    self._split_to_registry_repo_tag = None
 
     generated_properties = dictionary.get('generatedProperties', {})
     if 'splitByColon' in generated_properties:
@@ -306,11 +332,25 @@ class SchemaXImage:
       if 'after' not in s:
         raise InvalidSchema('"after" attribute is required within splitByColon')
       self._split_by_colon = (s['before'], s['after'])
+    if 'splitToRegistryRepoTag' in generated_properties:
+      s = generated_properties['splitToRegistryRepoTag']
+      parts = ['registry', 'repo', 'tag']
+      for name in parts:
+        if name not in s:
+          raise InvalidSchema(
+              '"{}" attribute is required within splitToRegistryRepoTag'.format(
+                  name))
+      self._split_to_registry_repo_tag = tuple([s[name] for name in parts])
 
   @property
   def split_by_colon(self):
     """Return 2-tuple of before- and after-colon names, or None"""
     return self._split_by_colon
+
+  @property
+  def _split_to_registry_repo_tag(self):
+    """Return 3-tuple, or None"""
+    return self._split_to_registry_repo_tag
 
 
 SchemaXPassword = collections.namedtuple(

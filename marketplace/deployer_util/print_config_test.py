@@ -38,8 +38,7 @@ class PrintConfigTest(unittest.TestCase):
               """.encode('utf_8'))
       f.flush()
 
-      values = config_helper.load_values(f.name, '/non/existence/dir', 'utf_8',
-                                         schema)
+      values = config_helper.load_values(f.name, '/non/existence/dir', schema)
       self.assertEqual({'propertyInt': 3, 'propertyString': 'abc'}, values)
 
   def test_output_shell_vars(self):
@@ -55,11 +54,11 @@ class PrintConfigTest(unittest.TestCase):
         'propertyInt': 1,
         'propertyString': 'unnested',
         'dotted.propertyInt': 2,
-        'dotted.propertyString': 'nested_1',
-        'double.propertyInt': 3,
-        'double.propertyString': 'nested_2',
-        'double.dotted.propertyInt': 4,
-        'double.dotted.propertyString': 'double_nested_1'
+        'dotted.propertyString': 'nested',
+        'dotted.dotted.propertyInt': 3,
+        'dotted.dotted.propertyString': 'double_nested',
+        'dotted.dotted.dotted.propertyInt': 4,
+        'dotted.dotted.dotted.propertyString': 'triple_nested',
     }
     actual = print_config.output_yaml(values)
     self.assertEquals(
@@ -68,42 +67,55 @@ class PrintConfigTest(unittest.TestCase):
             'propertyString': 'unnested',
             'dotted': {
                 'propertyInt': 2,
-                'propertyString': 'nested_1'
-            },
-            'double': {
-                'propertyInt': 3,
-                'propertyString': 'nested_2',
+                'propertyString': 'nested',
                 'dotted': {
-                    'propertyInt': 4,
-                    'propertyString': 'double_nested_1'
+                    'propertyInt': 3,
+                    'propertyString': 'double_nested',
+                    'dotted': {
+                        'propertyInt': 4,
+                        'propertyString': 'triple_nested',
+                    },
                 },
             }
         })
 
   def test_output_param(self):
-    values = {'propertyInt': 1, 'propertyString': 'Value'}
+    values = {'name': 'name-1', 'namespace': 'namespace-1'}
     schema = config_helper.Schema.load_yaml("""
         properties:
-          propertyInt:
-            type: int
-          propertyString:
+          name:
             type: string
+            x-google-marketplace:
+              type: NAME
+          namespace:
+            type: string
+            x-google-marketplace:
+              type: NAMESPACE
         """)
+    self.assertEqual('name',
+                     print_config.output_xtype(values, schema, 'NAME', True))
     self.assertEqual(
-        '1', print_config.output_param(values, schema, {'name': 'propertyInt'}))
+        'namespace', print_config.output_xtype(values, schema, 'NAMESPACE',
+                                               True))
+    self.assertEqual('name-1',
+                     print_config.output_xtype(values, schema, 'NAME', False))
     self.assertEqual(
-        'Value',
-        print_config.output_param(values, schema, {'name': 'propertyString'}))
+        'namespace-1',
+        print_config.output_xtype(values, schema, 'NAMESPACE', False))
 
   def test_output_param_multiple(self):
     values = {'property1': 'Value1', 'property2': 'Value2'}
     schema = config_helper.Schema.load_yaml("""
         properties:
-          property1:
+          image1:
             type: string
-          property2:
+            x-google-marketplace:
+              type: IMAGE
+          image2:
             type: string
+            x-google-marketplace:
+              type: IMAGE
         """)
     self.assertRaises(
         print_config.InvalidParameter,
-        lambda: print_config.output_param(values, schema, {'type': 'string'}))
+        lambda: print_config.output_xtype(values, schema, 'IMAGE', True))

@@ -49,14 +49,25 @@ properties:
     default: gcr.io/google/busybox
     x-google-marketplace:
       type: IMAGE
+  propertyDeployerImage:
+    type: string
+    x-google-marketplace:
+      type: DEPLOYER_IMAGE
   propertyPassword:
     type: string
     x-google-marketplace:
       type: GENERATED_PASSWORD
       length: 4
+  applicationUid:
+    type: string
+    x-google-marketplace:
+      type: APPLICATION_UID
 required:
 - propertyString
 - propertyPassword
+form:
+- widget: help
+  description: My arbitrary <i>description</i>
 """
 
 
@@ -71,6 +82,7 @@ class ConfigHelperTest(unittest.TestCase):
       schema_from_str = config_helper.Schema.load_yaml(SCHEMA)
       self.assertEqual(schema.properties, schema_from_str.properties)
       self.assertEqual(schema.required, schema_from_str.required)
+      self.assertEqual(schema.form, schema_from_str.form)
 
   def test_bad_required(self):
     schema_yaml = """
@@ -93,7 +105,8 @@ class ConfigHelperTest(unittest.TestCase):
         'propertyIntWithDefault', 'propertyInteger',
         'propertyIntegerWithDefault', 'propertyNumber',
         'propertyNumberWithDefault', 'propertyBoolean',
-        'propertyBooleanWithDefault', 'propertyImage', 'propertyPassword'
+        'propertyBooleanWithDefault', 'propertyImage', 'propertyDeployerImage',
+        'propertyPassword', 'applicationUid'
     }, set(schema.properties))
     self.assertEqual(str, schema.properties['propertyString'].type)
     self.assertIsNone(schema.properties['propertyString'].default)
@@ -122,18 +135,29 @@ class ConfigHelperTest(unittest.TestCase):
     self.assertEqual('gcr.io/google/busybox',
                      schema.properties['propertyImage'].default)
     self.assertEqual('IMAGE', schema.properties['propertyImage'].xtype)
+    self.assertEqual('DEPLOYER_IMAGE',
+                     schema.properties['propertyDeployerImage'].xtype)
     self.assertEqual(str, schema.properties['propertyPassword'].type)
     self.assertIsNone(schema.properties['propertyPassword'].default)
     self.assertEqual('GENERATED_PASSWORD',
                      schema.properties['propertyPassword'].xtype)
+    self.assertEqual('My arbitrary <i>description</i>',
+                     schema.form[0]['description'])
 
-  def test_invalid_name(self):
+  def test_invalid_names(self):
     self.assertRaises(
         config_helper.InvalidSchema, lambda: config_helper.Schema.load_yaml("""
             properties:
               bad/name:
                 type: string
             """))
+
+  def test_valid_names(self):
+    config_helper.Schema.load_yaml("""
+        properties:
+          a-good_name:
+            type: string
+        """)
 
   def test_required(self):
     schema = config_helper.Schema.load_yaml(SCHEMA)
@@ -187,6 +211,7 @@ class ConfigHelperTest(unittest.TestCase):
         """)
     self.assertIsNotNone(schema.properties['i'].image)
     self.assertIsNone(schema.properties['i'].image.split_by_colon)
+    self.assertIsNone(schema.properties['i'].image._split_to_registry_repo_tag)
 
   def test_image_type_splitbycolon(self):
     schema = config_helper.Schema.load_yaml("""
@@ -204,6 +229,34 @@ class ConfigHelperTest(unittest.TestCase):
     self.assertIsNotNone(schema.properties['i'].image)
     self.assertEqual(('image.before', 'image.after'),
                      schema.properties['i'].image.split_by_colon)
+
+  def test_image_type_splittoregistryrepotag(self):
+    schema = config_helper.Schema.load_yaml("""
+        properties:
+          i:
+            type: string
+            x-google-marketplace:
+              type: IMAGE
+              image:
+                generatedProperties:
+                  splitToRegistryRepoTag:
+                    registry: image.registry
+                    repo: image.repo
+                    tag: image.tag
+        """)
+    self.assertIsNotNone(schema.properties['i'].image)
+    self.assertEqual(('image.registry', 'image.repo', 'image.tag'),
+                     schema.properties['i'].image._split_to_registry_repo_tag)
+
+  def test_deployer_image_type(self):
+    schema = config_helper.Schema.load_yaml("""
+        properties:
+          di:
+            type: string
+            x-google-marketplace:
+              type: DEPLOYER_IMAGE
+        """)
+    self.assertIsNotNone(schema.properties['di'])
 
   def test_password(self):
     schema = config_helper.Schema.load_yaml("""
@@ -431,6 +484,16 @@ class ConfigHelperTest(unittest.TestCase):
         """)
     self.assertIsNotNone(schema.properties['rs'].reporting_secret)
 
+  def test_application_uid_type(self):
+    schema = config_helper.Schema.load_yaml("""
+        properties:
+          u:
+            type: string
+            x-google-marketplace:
+              type: APPLICATION_UID
+        """)
+    self.assertIsNotNone(schema.properties['u'])
+
   def test_unknown_type(self):
     self.assertRaises(
         config_helper.InvalidSchema, lambda: config_helper.Schema.load_yaml("""
@@ -443,20 +506,79 @@ class ConfigHelperTest(unittest.TestCase):
 
   def test_validate_good(self):
     schema = config_helper.Schema.load_yaml("""
-        application_api_version: v1beta1
+        applicationApiVersion: v1beta1
         properties:
           simple:
             type: string
         """)
     schema.validate()
 
+  def test_app_api_version_alternative_names(self):
+    schema = config_helper.Schema.load_yaml("""
+        applicationApiVersion: v1beta1
+        properties:
+          simple:
+            type: string
+        """)
+    schema.validate()
+    self.assertEqual(schema.app_api_version, 'v1beta1')
+
+    schema = config_helper.Schema.load_yaml("""
+        application_api_version: v1beta1
+        properties:
+          simple:
+            type: string
+        """)
+    schema.validate()
+    self.assertEqual(schema.app_api_version, 'v1beta1')
+
   def test_validate_missing_app_api_version(self):
     self.assertRaisesRegexp(
-        config_helper.InvalidSchema, 'application_api_version',
+        config_helper.InvalidSchema, 'applicationApiVersion',
         lambda: config_helper.Schema.load_yaml("""
             properties:
               simple:
                 type: string
+            """).validate())
+
+  def test_validate_bad_form_too_many_items(self):
+    self.assertRaisesRegexp(
+        config_helper.InvalidSchema, 'form',
+        lambda: config_helper.Schema.load_yaml("""
+            applicationApiVersion: v1beta1
+            form:
+            - widget: help
+              description: My arbitrary <i>description</i>
+            - widget: help
+              description: My arbitrary <i>description</i>
+            """).validate())
+
+  def test_validate_bad_form_missing_type(self):
+    self.assertRaisesRegexp(
+        config_helper.InvalidSchema, 'form',
+        lambda: config_helper.Schema.load_yaml("""
+            applicationApiVersion: v1beta1
+            form:
+            - description: My arbitrary <i>description</i>
+            """).validate())
+
+  def test_validate_bad_form_unrecognized_type(self):
+    self.assertRaisesRegexp(
+        config_helper.InvalidSchema, 'form',
+        lambda: config_helper.Schema.load_yaml("""
+            applicationApiVersion: v1beta1
+            form:
+            - widget: magical
+              description: My arbitrary <i>description</i>
+            """).validate())
+
+  def test_validate_bad_form_missing_description(self):
+    self.assertRaisesRegexp(
+        config_helper.InvalidSchema, 'form',
+        lambda: config_helper.Schema.load_yaml("""
+            applicationApiVersion: v1beta1
+            form:
+            - widget: help
             """).validate())
 
 

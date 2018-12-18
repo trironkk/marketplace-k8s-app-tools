@@ -52,8 +52,8 @@ function extract_manifest() {
 
 
   # Expand the chart template.
-  if [[ -d "$data_chart" && "$(ls -Al "$data_chart")" ]]; then
-    for chart in "$data_chart"/*; do
+  if [[ -d "$data_chart" ]]; then
+    for chart in $(find "$data_chart" -maxdepth 1 -type f -name "*.tar.gz"); do
       chart_manifest_file=$(basename "$chart" | sed 's/.tar.gz$//')
       mkdir "$extracted/$chart_manifest_file"
       tar xfC "$chart" "$extracted/$chart_manifest_file"
@@ -71,6 +71,13 @@ if [[ "$mode" = "test" ]]; then
     --manifest "$data_dir/extracted" \
     --test_manifest "$test_data_dir/extracted"
 fi
+
+# Log information and, at the same time, catch errors early and separately.
+# This is a work around for the fact that process and command substitutions
+# do not propagate errors.
+echo "=== values.yaml ==="
+/bin/print_config.py --output=yaml
+echo "==================="
 
 # Run helm expansion.
 for chart in "$data_dir/extracted"/*; do
